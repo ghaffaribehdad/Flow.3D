@@ -20,6 +20,7 @@
 
 #include "FilePool.h"
 #include "TimeVolumeInfo.h"
+#include "../Renderer/Measure.h"
 
 using tum3D::Vec3i;
 using tum3D::Vec3ui;
@@ -97,6 +98,9 @@ public:
 		LoadingState GetLoadingState() const { return m_state; }
 		bool IsLoaded() const { return m_state == LOADING_STATE_FINISHED; }
 
+		const float* GetMinMeasuresInBrick() const { return m_pMinMeasuresInBrick; }
+		const float* GetMaxMeasuresInBrick() const  { return m_pMaxMeasuresInBrick; }
+
 	private:
 		bool		m_exists;
 
@@ -112,6 +116,10 @@ public:
 		int64		m_pChannelSize[ms_channelCountMax];
 		void*		m_ppChannelData[ms_channelCountMax];
 		LoadingState	m_state;
+
+		// The minimum and maximum values for all measures in our brick.
+		float		m_pMinMeasuresInBrick[NUM_MEASURES];
+		float		m_pMaxMeasuresInBrick[NUM_MEASURES];
 
 		int64		m_bytesize;			///< Usable bytesize of this brick
 		int64		m_bytesizePadded;
@@ -170,7 +178,8 @@ public:
 	considered as "not loaded"
 	*/
 	template<typename T>
-	inline Brick& AddBrick(int32 timestep, const Vec3i& spatialIndex, const Vec3ui& size, const std::vector<std::vector<T>>& channelData);
+	inline Brick& AddBrick(int32 timestep, const Vec3i& spatialIndex, const Vec3ui& size, const std::vector<std::vector<T>>& channelData,
+			const std::vector<float>& minMeasuresInBrick, const std::vector<float>& maxMeasuresInBrick);
 
 	/** Load a brick's data
 	This load will be performed asynchronously, but can be blocked using WaitForAllIO()
@@ -291,6 +300,10 @@ private:
 		int64		bytesize;			///< Usable bytesize of this brick
 		int64		paddedBytesize;		///< On-disk size of this brick
 		Vec3ui		bricksize;			///< Real bricksize, might differ from default for border bricks
+
+		// The minimum and maximum values for all measures in our brick.
+		float		m_pMinMeasuresInBrick[NUM_MEASURES];
+		float		m_pMaxMeasuresInBrick[NUM_MEASURES];
 	};
 	#pragma pack(pop)
 
@@ -406,7 +419,8 @@ const char TIMESTEP_FILE_MASK[] = "%05d";
 
 // ************** Implementation ****************************
 template<typename T>
-TimeVolumeIO::Brick& TimeVolumeIO::AddBrick(int32 timestep, const Vec3i& spatialIndex, const Vec3ui& size, const std::vector<std::vector<T>>& channelData)
+TimeVolumeIO::Brick& TimeVolumeIO::AddBrick(int32 timestep, const Vec3i& spatialIndex, const Vec3ui& size, const std::vector<std::vector<T>>& channelData,
+		const std::vector<float>& minMeasuresInBrick, const std::vector<float>& maxMeasuresInBrick)
 {
 	assert("Invalid timestep" && (timestep >= 0));
 
@@ -442,6 +456,9 @@ TimeVolumeIO::Brick& TimeVolumeIO::AddBrick(int32 timestep, const Vec3i& spatial
 		brick.m_pChannelSize[i] = channelData[i].size() * sizeof(T);
 		brick.m_bytesize += brick.m_pChannelSize[i];
 	}
+
+	memcpy(brick.m_pMinMeasuresInBrick, minMeasuresInBrick.data(), sizeof(float)*NUM_MEASURES);
+	memcpy(brick.m_pMaxMeasuresInBrick, maxMeasuresInBrick.data(), sizeof(float)*NUM_MEASURES);
 
 	if (!m_info.IsCompressed())
 	{

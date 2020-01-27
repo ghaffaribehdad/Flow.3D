@@ -4,21 +4,25 @@
 #include <iomanip>
 #include <algorithm>
 #include <iterator>
+#include <cmath>
+#include <cfloat>
 #include <conio.h>
 #include <vector>
-#include <stdlib.h>
+#include <cstdlib>
 
 #include <tclap/CmdLine.h>
-#include <Json\Json.h>
+#include <Json/Json.h>
 #include <cudaCompress/Instance.h>
 #include <cudaUtil.h>
 
 #include "Utils.h"
 #include "SysTools.h"
-#include "LargeArray3D.h"
 #include "Statistics.h"
 
 #include "TimeVolumeIO.h"
+#include "MMapFile.h"
+#include "FileSliceLoader.h"
+#include "MeasuresGPU.h"
 
 #include "CompressVolume.h"
 #include "GPUResources.h"
@@ -80,6 +84,34 @@ std::vector<std::string> split(const std::string &s, char delim) {
 	return elems;
 }
 
+/**
+ * Computes the minimum/maximum values of all measures in this brick as a preprocess step in order
+ * to be able to terminate early when raytracing iso surfaces.
+ */
+void computeMinMaxMeasures(
+		const std::vector<std::vector<float>> &rawBrickChannelData,
+		std::vector<float> &minMeasuresInBrick, std::vector<float> &maxMeasuresInBrick,
+		size_t sizeX, size_t sizeY, size_t sizeZ, size_t overlap, const tum3D::Vec3f& gridSpacing,
+		MinMaxMeasureGPUHelperData* helperData) {
+	const bool useCPU = false;
+	minMeasuresInBrick.resize(NUM_MEASURES);
+	maxMeasuresInBrick.resize(NUM_MEASURES);
+
+	for (size_t measureIdx = 0; measureIdx < NUM_MEASURES; measureIdx++) {
+		float minValue = FLT_MAX;
+		float maxValue = -FLT_MAX;
+
+		eMeasureSource measureSource = GetMeasureSource((eMeasure)measureIdx);
+		VolumeTextureCPU tex(rawBrickChannelData, sizeX, sizeY, sizeZ, overlap);
+		computeMeasureMinMaxGPU(
+				tex, gridSpacing, measureSource, (eMeasure)measureIdx,
+				helperData, minValue, maxValue);
+
+		minMeasuresInBrick[measureIdx] = minValue;
+		maxMeasuresInBrick[measureIdx] = maxValue;
+	}
+}
+
 
 int main(int argc, char* argv[])
 {
@@ -91,7 +123,12 @@ int main(int argc, char* argv[])
 	{
 		string fileMask;
 		int channels;
-		LA3D::LargeArray3D<float>* tmpArray;
+#ifdef USE_MMAP_FILE
+		MMapFile* mmapFile;
+#else
+		FileSliceLoader* fileSliceLoader;
+#endif
+		float* memory;
 	};
 
 	//atexit(&e);
@@ -418,7 +455,6 @@ int main(int argc, char* argv[])
 			FileListItem desc;
 			E_ASSERT("Invalid input file desc: " << *it, sscanf_s(it->c_str(), "%[^:]:%d", tmp, 1024, &desc.channels) == 2);
 			desc.fileMask = tmp;
-			desc.tmpArray = new LA3D::LargeArray3D<float>(desc.channels);
 
 			fileList.push_back(desc);
 			channels += desc.channels;
@@ -553,7 +589,6 @@ int main(int argc, char* argv[])
 	}
 
 	// accumulated timings, in seconds
-	float timeCreateLA3D = 0.0f;
 	float timeBricking = 0.0f;
 	float timeCompressGPU = 0.0f;
 	float timeDecompressGPU = 0.0f;
@@ -583,7 +618,6 @@ int main(int argc, char* argv[])
 	}
 
 
-	float *srcSlice = new float[(float)volumeSize[0] * (float)volumeSize[1] * 4.0f];		// 4 = max number of channels
 	std::vector<std::vector<float>> rawBrickChannelData(channels);
 	std::vector<std::vector<float>> rawBrickChannelDataReconst(channels);
 	std::vector<std::vector<uint32>> compressedBrickChannelData(channels);
@@ -643,10 +677,8 @@ int main(int argc, char* argv[])
 
 	char fn[1024];
 
-	uint64 laMem = uint64(0.8f * float(GetAvailableMemory()) / float(fileList.size()));
-	// don't use more than 4 GB total
-	uint64 laMemMax = 4 * 1024ull * 1024ull * 1024ull / fileList.size();
-	laMem = min(laMem, laMemMax);
+	uint64 testVal = GetAvailableMemory();
+	uint64 fileBufferMem = uint64(0.8f * float(GetAvailableMemory()) / float(fileList.size()));
 
 
 	Statistics statsGlobal;
@@ -679,6 +711,8 @@ int main(int argc, char* argv[])
 	}
 
 
+	MinMaxMeasureGPUHelperData* helperData = new MinMaxMeasureGPUHelperData(brickSize, brickSize, brickSize, overlap);
+
 	// Run through all timesteps
 	for (int32 timestep = tMin; timestep <= tMax; timestep += tStep)
 	{
@@ -686,10 +720,12 @@ int main(int argc, char* argv[])
 
 		std::vector<Statistics> statsTimestepChannels(channels);
 
-		LARGE_INTEGER timestampLA3DStart;
-		QueryPerformanceCounter(&timestampLA3DStart);
+		uint64_t numChannelsTotal = 0;
 
-		bool createdLA3Ds = true;
+		for (auto fdesc = fileList.begin(); fdesc != fileList.end(); ++fdesc)
+		{
+			numChannelsTotal += fdesc->channels;
+		}
 
 		for (auto fdesc = fileList.begin(); fdesc != fileList.end(); ++fdesc)
 		{
@@ -698,49 +734,22 @@ int main(int argc, char* argv[])
 			sprintf_s(fn, fdesc->fileMask.c_str(), timestep);
 			string fileName(fn);
 
-			string tmpFilePath = tmpPath + "tmp_" + fileName + ".la3d";
-			wstring wstrTmpFilePath(tmpFilePath.begin(), tmpFilePath.end());
-
-			if(tum3d::FileExists(tmpFilePath))
-			{
-				//TODO check size etc?
-				cout << "Using existing LA3D file " << tmpFilePath << "\n";
-				fdesc->tmpArray->Open(wstrTmpFilePath.c_str(), true, laMem);
-				createdLA3Ds = false;
-				continue;
-			}
-
 			cout << "Loading channels from " << fileName << "...\n";
 
 			// Check if file exists
 			string filePath = inPath + fileName;
 			E_ASSERT("File " << filePath << " does not exist", tum3d::FileExists(filePath));
 
-			// Open file
-			FILE *file;
-			fopen_s(&file, filePath.c_str(), "rb");
-			E_ASSERT("Could not open file \"" << filePath << "\"", file != nullptr);
-
-
-			// Create output array
-			fdesc->tmpArray->Create(volumeSize[0], volumeSize[1], volumeSize[2], 64, 64, 64, wstrTmpFilePath.c_str(), laMem);
-
-			// Read slice by slice and write to target array
-			cout << "Creating LA3D for " << fileName << "\n\n";
-
-
-			for (int32 slice = 0; slice < volumeSize[2]; ++slice)
-			{
-				SimpleProgress(slice, volumeSize[2] - 1);
-
-				fread(srcSlice, sizeof(float) * fdesc->channels, volumeSize[0] * volumeSize[1], file);
-				fdesc->tmpArray->CopyFrom(srcSlice, 0, 0, slice, volumeSize[0], volumeSize[1], 1, volumeSize[0], volumeSize[1]);
-			}
+			// Create the reading buffer
+#ifdef USE_MMAP_FILE
+			fdesc->mmapFile = new MMapFile;
+			fdesc->memory = static_cast<float*>(fdesc->mmapFile->openFile(filePath));
+#else
+			fdesc->fileSliceLoader = new FileSliceLoader();
+			const size_t SLICE_HEIGHT = 32; // TODO
+			fdesc->fileSliceLoader->openFile(filePath, fileBufferMem * numChannelsTotal / fdesc->channels, SLICE_HEIGHT, volumeSize[0], volumeSize[1], volumeSize[2], fdesc->channels);
+#endif
 		}
-
-		LARGE_INTEGER timestampLA3DEnd;
-		QueryPerformanceCounter(&timestampLA3DEnd);
-		timeCreateLA3D += float(timestampLA3DEnd.QuadPart - timestampLA3DStart.QuadPart) / float(perfFreq.QuadPart);
 
 		cout << "\n\nBricking...\n";
 
@@ -783,10 +792,10 @@ int main(int argc, char* argv[])
 							{
 								for (uint32 x = 0; x < size.x(); ++x)
 								{
-									int32 volPos[3];
-									volPos[0] = bx * brickDataSize - overlap + x;
-									volPos[1] = by * brickDataSize - overlap + y;
-									volPos[2] = bz * brickDataSize - overlap + z;
+									ptrdiff_t volPos[3];
+									volPos[0] = ptrdiff_t(bx) * brickDataSize - overlap + x;
+									volPos[1] = ptrdiff_t(by) * brickDataSize - overlap + y;
+									volPos[2] = ptrdiff_t(bz) * brickDataSize - overlap + z;
 
 									if(periodic)
 									{
@@ -796,14 +805,19 @@ int main(int argc, char* argv[])
 									}
 									else
 									{
-										volPos[0] = clamp(volPos[0], 0, volumeSize[0] - 1);
-										volPos[1] = clamp(volPos[1], 0, volumeSize[1] - 1);
-										volPos[2] = clamp(volPos[2], 0, volumeSize[2] - 1);
+										volPos[0] = clamp(volPos[0], ptrdiff_t(0), ptrdiff_t(volumeSize[0]) - 1);
+										volPos[1] = clamp(volPos[1], ptrdiff_t(0), ptrdiff_t(volumeSize[1]) - 1);
+										volPos[2] = clamp(volPos[2], ptrdiff_t(0), ptrdiff_t(volumeSize[2]) - 1);
 									}
 
 									for (int32 localChannel = 0; localChannel < fdesc->channels; ++localChannel)
 									{
-										*dstPtr[localChannel]++ = fdesc->tmpArray->Get(volPos[0], volPos[1], volPos[2])[localChannel];
+#ifdef USE_MMAP_FILE
+										ptrdiff_t fileOffset = (volPos[0] + (volPos[1] + volPos[2] * volumeSize[1]) * volumeSize[0]) * fdesc->channels + localChannel;
+										*dstPtr[localChannel]++ = fdesc->memory[fileOffset];
+#else
+										*dstPtr[localChannel]++ = fdesc->fileSliceLoader->getMemoryAt(volPos[0], volPos[1], volPos[2], localChannel);
+#endif
 									}
 								}
 							}
@@ -888,15 +902,22 @@ int main(int argc, char* argv[])
 					fileStatsBrick << timestep << ";" << bx << ";" << by << ";" << bz << ";";
 					WriteStatsCSV(fileStatsBrick, statsBrick.GetStats(), quantStepCommon);
 
+					// Compute all minimum/maximum values of the measures in this brick for accelerating raytracing of iso surfaces
+					std::vector<float> minMeasuresInBrick, maxMeasuresInBrick;
+					computeMinMaxMeasures(
+							rawBrickChannelData, minMeasuresInBrick, maxMeasuresInBrick,
+							size.x(), size.y(), size.z(), overlap, gridSpacing, helperData);
 
 					// Add brick to output
 					if (compression != COMPRESSION_NONE)
 					{
-						out.AddBrick((timestep - tMin) / tStep + tOffset, spatialIndex, size, compressedBrickChannelData);
+						out.AddBrick((timestep - tMin) / tStep + tOffset, spatialIndex, size, compressedBrickChannelData,
+								minMeasuresInBrick, maxMeasuresInBrick);
 					}
 					else
 					{
-						out.AddBrick((timestep - tMin) / tStep + tOffset, spatialIndex, size, rawBrickChannelData);
+						out.AddBrick((timestep - tMin) / tStep + tOffset, spatialIndex, size, rawBrickChannelData,
+								minMeasuresInBrick, maxMeasuresInBrick);
 					}
 
 				}	// For x
@@ -927,21 +948,17 @@ int main(int argc, char* argv[])
 		// close and (optionally) delete temp files
 		for (auto fdesc = fileList.begin(); fdesc != fileList.end(); ++fdesc)
 		{
-			// delete file only if we created it ourselves
-			bool discard = createdLA3Ds && !keepLA3Ds;
-			// don't bother saving anything if file will be deleted anyway
-			fdesc->tmpArray->Close(discard);
-			if(discard)
-			{
-				// delete the file
-				sprintf_s(fn, fdesc->fileMask.c_str(), timestep);
-				string fileName(fn);
-				string tmpFilePath = tmpPath + "tmp_" + fileName + ".la3d";
-				DeleteFileA(tmpFilePath.c_str());
-			}
+			//fclose(fdesc->file);
+#ifdef USE_MMAP_FILE
+			delete fdesc->mmapFile;
+#else
+			delete fdesc->fileSliceLoader;
+#endif
 		}
 
 	}	// For timestep
+	delete helperData;
+
 
 	// write accumulated global stats to file
 	Statistics statsTimestep;
@@ -953,13 +970,6 @@ int main(int argc, char* argv[])
 	}
 	WriteStatsCSV(fileStatsGlobal, statsGlobal.GetStats(), quantStepCommon);
 
-
-	for (auto fdesc = fileList.begin(); fdesc != fileList.end(); ++fdesc)
-	{
-		delete fdesc->tmpArray;
-	}
-
-	delete[] srcSlice;
 
 	for (int i = 0; i < channels; ++i)
 	{
@@ -985,7 +995,6 @@ int main(int argc, char* argv[])
 	std::ofstream fileTimings(outPath + outFile + "_timings.txt");
 	fileTimings;
 	fileTimings << "Total time:       " << fixed << setw(10) << setprecision(3) << timeGlobal << " s\n";
-	fileTimings << "Create LA3Ds:     " << fixed << setw(10) << setprecision(3) << timeCreateLA3D << " s\n";
 	fileTimings << "Bricking:         " << fixed << setw(10) << setprecision(3) << timeBricking << " s\n";
 	fileTimings << "Compress (GPU):   " << fixed << setw(10) << setprecision(3) << timeCompressGPU << " s\n";
 	fileTimings << "Decompress (GPU): " << fixed << setw(10) << setprecision(3) << timeDecompressGPU << " s\n";

@@ -126,6 +126,10 @@
     <ClInclude Include="..\include\Json\json_st.hh">
       <Filter>Json</Filter>
     </ClInclude>
+    <ClInclude Include="MeasuresGPU.h" />
+    <ClInclude Include="..\Renderer\Measures.cuh" />
+    <ClInclude Include="MMapFile.h" />
+    <ClInclude Include="FileSliceLoader.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\shared\TimeVolumeIO.cpp" />
@@ -143,6 +147,9 @@
     <ClCompile Include="..\include\Json\Json_st.cc">
       <Filter>Json</Filter>
     </ClCompile>
+    <ClCompile Include="..\Renderer\Measure.cpp" />
+    <ClCompile Include="MMapFile.cpp" />
+    <ClCompile Include="FileSliceLoader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="cudaCompress">
@@ -157,5 +164,9 @@
     <Filter Include="Json">
       <UniqueIdentifier>{d7fec3f0-079e-4485-b77e-70d323f10ac9}</UniqueIdentifier>
     </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="MeasuresGPU.cu" />
+    <CudaCompile Include="..\Renderer\Measures.cu" />
   </ItemGroup>
 </Project>

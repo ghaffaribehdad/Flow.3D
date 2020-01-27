@@ -373,7 +373,18 @@ RaycasterManager::eRenderState RaycasterManager::StartRendering(
 			clipped = clipped || planeClipped;
 		}
 
-		if (clipped)
+
+		// Clip the voxel if the iso value is not in the data range of our voxel.
+		bool isoValueNotInMinMaxRange = false;
+		if (m_raycastParams.m_raycastMode == RAYCAST_MODE_ISO) {
+			float minValueMeasure1 = m_raycastParams.m_measureScale1 * pBrick->GetMinMeasuresInBrick()[static_cast<size_t>(m_raycastParams.m_measure1)];
+			float maxValueMeasure1 = m_raycastParams.m_measureScale1 * pBrick->GetMaxMeasuresInBrick()[static_cast<size_t>(m_raycastParams.m_measure1)];
+			if (m_raycastParams.m_isoValue1 < minValueMeasure1 || m_raycastParams.m_isoValue1 > maxValueMeasure1) {
+				isoValueNotInMinMaxRange = true;
+			}
+		}
+
+		if (clipped || isoValueNotInMinMaxRange)
 		{
 			m_bricksClipped.push_back(pBrick);
 		}
