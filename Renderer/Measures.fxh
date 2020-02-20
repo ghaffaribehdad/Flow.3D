@@ -59,9 +59,9 @@ float Trace3x3(float3x3 A)
 
 float TraceAAT(float3x3 A)
 {
-	return float(A[0].x*A[0].x + A[0].y*A[0].y + A[0].z*A[0].z +
-		A[1].x*A[1].x + A[1].y*A[1].y + A[1].z*A[1].z +
-		A[2].x*A[2].x + A[2].y*A[2].y + A[2].z*A[2].z);
+	return float(A[0].x * A[0].x + A[0].y * A[0].y + A[0].z * A[0].z +
+		A[1].x * A[1].x + A[1].y * A[1].y + A[1].z * A[1].z +
+		A[2].x * A[2].x + A[2].y * A[2].y + A[2].z * A[2].z);
 }
 
 
@@ -77,7 +77,7 @@ float3 getHeatCurrent(float3 vel, float4 heat)
 
 	float ra = 7e5;
 	float pr = 0.7;
-	float kappa = 1 / sqrt(ra*pr);
+	float kappa = 1 / sqrt(ra * pr);
 
 	j.x = vel.x * heat.w - kappa * heat.x;
 	j.y = vel.y * heat.w - kappa * heat.y;
@@ -90,37 +90,37 @@ float3 getHeatCurrent(float3 vel, float4 heat)
 
 float getLambda2(float3x3 J)
 {
-	float s01 = 0.5*((J[0].x + J[1].y)*(J[0].y + J[1].x) + J[0].z*J[2].y + J[1].z*J[2].x);
-	float s02 = 0.5*((J[0].x + J[2].z)*(J[0].z + J[2].x) + J[0].y*J[1].z + J[2].y*J[1].x);
-	float s12 = 0.5*((J[1].y + J[2].z)*(J[1].z + J[2].y) + J[1].x*J[0].z + J[2].x*J[0].y);
+	float s01 = 0.5 * ((J[0].x + J[1].y) * (J[0].y + J[1].x) + J[0].z * J[2].y + J[1].z * J[2].x);
+	float s02 = 0.5 * ((J[0].x + J[2].z) * (J[0].z + J[2].x) + J[0].y * J[1].z + J[2].y * J[1].x);
+	float s12 = 0.5 * ((J[1].y + J[2].z) * (J[1].z + J[2].y) + J[1].x * J[0].z + J[2].x * J[0].y);
 
-	float s00 = J[0].x*J[0].x + J[0].y*J[1].x + J[0].z*J[2].x;
-	float s11 = J[1].x*J[0].y + J[1].y*J[1].y + J[1].z*J[2].y;
-	float s22 = J[2].x*J[0].z + J[2].y*J[1].z + J[2].z*J[2].z;
+	float s00 = J[0].x * J[0].x + J[0].y * J[1].x + J[0].z * J[2].x;
+	float s11 = J[1].x * J[0].y + J[1].y * J[1].y + J[1].z * J[2].y;
+	float s22 = J[2].x * J[0].z + J[2].y * J[1].z + J[2].z * J[2].z;
 
 	float b = +s00 + s11 + s22;
-	float c = -s00*(s11 + s22) - s11*s22 + s12*s12 + s01*s01 + s02*s02;
-	float d = s00*(s11*s22 - s12*s12) + 2.0*s01*s12*s02 - s02*s02*s11 - s01*s01*s22;
+	float c = -s00 * (s11 + s22) - s11 * s22 + s12 * s12 + s01 * s01 + s02 * s02;
+	float d = s00 * (s11 * s22 - s12 * s12) + 2.0 * s01 * s12 * s02 - s02 * s02 * s11 - s01 * s01 * s22;
 
 	const float onethird = 1.0f / 3.0f;
-	float xN = b*onethird;
-	float yN = d + xN*(c + xN*(b - xN));
-	float deltasqr = xN*xN + c*onethird;
-	float delta = -sign(yN)*sqrt(deltasqr);
-	float hsqr = 4.0f*deltasqr*deltasqr*deltasqr;
-	float h = -2.0f*delta*deltasqr;
-	float yNsqr = yN*yN;
+	float xN = b * onethird;
+	float yN = d + xN * (c + xN * (b - xN));
+	float deltasqr = xN * xN + c * onethird;
+	float delta = -sign(yN) * sqrt(deltasqr);
+	float hsqr = 4.0f * deltasqr * deltasqr * deltasqr;
+	float h = -2.0f * delta * deltasqr;
+	float yNsqr = yN * yN;
 	float lambda2;
 
-	if (yNsqr>hsqr)
+	if (yNsqr > hsqr)
 	{
 		float D = sqrt(yNsqr - hsqr);
-		lambda2 = xN + sign(yN - D) * pow(0.5f*abs(yN - D), onethird)
-			+ sign(yN + D) * pow(0.5f*abs(yN + D), onethird);
+		lambda2 = xN + sign(yN - D) * pow(0.5f * abs(yN - D), onethird)
+			+ sign(yN + D) * pow(0.5f * abs(yN + D), onethird);
 	}
-	else if (yNsqr<hsqr)
+	else if (yNsqr < hsqr)
 	{
-		float3 L = xN + 2.0*delta*getCosines(-yN / h);
+		float3 L = xN + 2.0 * delta * getCosines(-yN / h);
 		lambda2 = min(max(min(L.x, L.y), L.z), max(L.x, L.y));
 	}
 	else
@@ -138,7 +138,7 @@ float getQHunt(float3x3 jacobian)
 	float3x3 O = getSpinTensor(jacobian);
 	float fS = FrobeniusNorm3x3(S);
 	float fO = FrobeniusNorm3x3(O);
-	return (0.5 * (fO*fO - fS*fS));
+	return (0.5 * (fO * fO - fS * fS));
 }
 
 
@@ -157,7 +157,7 @@ float getDeltaChong(float3x3 J)
 	Q /= 3.0f;
 	R /= 2.0f;
 
-	return (Q*Q*Q + R*R);
+	return (Q * Q * Q + R * R);
 }
 
 
@@ -168,6 +168,25 @@ float getSquareRotation(float3x3 J)
 
 	return float(-0.5 * Trace3x3(Osq));
 }
+
+
+float getTurbulentViscosity(const float3x3 J, float3 v)
+{
+	float3x3 S = getStrainRateTensor(J);
+
+	// kinetic dissipation rate
+	float kdr = 2.0f * sqrt(0.001f / 100000.0f) *
+		(
+			S[0].x * S[0].x + S[0].y * S[0].y + S[0].z * S[0].z +
+			S[1].x * S[1].x + S[1].y * S[1].y + S[0].z * S[1].z +
+			S[1].x * S[1].x + S[1].y * S[1].y + S[1].z * S[1].z
+			);
+	// Kinetic Turbulent Energy
+	float kte = 0.5f * dot(v, v);
+
+	return ((kte * kte) / kdr);
+}
+
 
 
 float getEnstrophyProduction(float3x3 J)
@@ -193,15 +212,15 @@ float getStrainProduction(float3x3 J)
 {
 	float3x3 S = getStrainRateTensor(J);
 
-	float e = S[0].x*S[0].x*S[0].x + S[0].x*S[0].y*S[1].x + S[0].x*S[0].z*S[2].x +
-		S[0].y*S[1].x*S[0].x + S[0].y*S[1].y*S[1].x + S[0].y*S[1].z*S[2].x +
-		S[0].z*S[2].x*S[0].x + S[0].z*S[2].y*S[1].x + S[0].z*S[2].z*S[2].x +
-		S[1].x*S[0].x*S[0].y + S[1].x*S[0].y*S[1].y + S[1].x*S[0].z*S[2].y +
-		S[1].y*S[1].x*S[0].y + S[1].y*S[1].y*S[1].y + S[1].y*S[1].z*S[2].y +
-		S[1].z*S[2].x*S[0].y + S[1].z*S[2].y*S[1].y + S[1].z*S[2].z*S[2].y +
-		S[2].x*S[0].x*S[0].z + S[2].x*S[0].y*S[1].z + S[2].x*S[0].z*S[2].z +
-		S[2].y*S[1].x*S[0].z + S[2].y*S[1].y*S[1].z + S[2].y*S[1].z*S[2].z +
-		S[2].z*S[2].x*S[0].z + S[2].z*S[2].y*S[1].z + S[2].z*S[2].z*S[2].z;
+	float e = S[0].x * S[0].x * S[0].x + S[0].x * S[0].y * S[1].x + S[0].x * S[0].z * S[2].x +
+		S[0].y * S[1].x * S[0].x + S[0].y * S[1].y * S[1].x + S[0].y * S[1].z * S[2].x +
+		S[0].z * S[2].x * S[0].x + S[0].z * S[2].y * S[1].x + S[0].z * S[2].z * S[2].x +
+		S[1].x * S[0].x * S[0].y + S[1].x * S[0].y * S[1].y + S[1].x * S[0].z * S[2].y +
+		S[1].y * S[1].x * S[0].y + S[1].y * S[1].y * S[1].y + S[1].y * S[1].z * S[2].y +
+		S[1].z * S[2].x * S[0].y + S[1].z * S[2].y * S[1].y + S[1].z * S[2].z * S[2].y +
+		S[2].x * S[0].x * S[0].z + S[2].x * S[0].y * S[1].z + S[2].x * S[0].z * S[2].z +
+		S[2].y * S[1].x * S[0].z + S[2].y * S[1].y * S[1].z + S[2].y * S[1].z * S[2].z +
+		S[2].z * S[2].x * S[0].z + S[2].z * S[2].y * S[1].z + S[2].z * S[2].z * S[2].z;
 
 	return e;
 }
@@ -257,6 +276,8 @@ float getMeasureFloat(int measure, LineVertex input)
 		return getHeatCurrent(input.vel, float4(input.heatCurrent, input.heat)).z;
 	case 19: //MEASURE_TIME_IN_CURRENT_CELL
 		return input.timeInCell[0];
+	case 20: // MEASURE_TURBULENT_VISCOSITY
+		return getTurbulentViscosity(input.jac, input.vel.xyz);
 	}
 	return 0.0;
 }

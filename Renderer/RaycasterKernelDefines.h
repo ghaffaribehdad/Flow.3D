@@ -20,6 +20,7 @@
 		case MEASURE_SOURCE_RAW:		RAYCASTER_RENDER_VOLUME_RT(kernel, MEASURE_SOURCE_RAW,  filter, computemode, colormode); break; \
 		case MEASURE_SOURCE_HEAT_CURRENT:	RAYCASTER_RENDER_VOLUME_RT(kernel, MEASURE_SOURCE_HEAT_CURRENT, filter, computemode, colormode); break; \
 		case MEASURE_SOURCE_JACOBIAN:		RAYCASTER_RENDER_VOLUME_RT(kernel, MEASURE_SOURCE_JACOBIAN, filter, computemode, colormode); break; \
+		case MEASURE_SOURCE_JACOBIAN_RAW:	RAYCASTER_RENDER_VOLUME_RT(kernel, MEASURE_SOURCE_JACOBIAN_RAW, filter, computemode, colormode); break; \
 	}
 
 // for non-multiscale kernels: precomputed vs. on-the-fly measure computation, but no color mode switch
